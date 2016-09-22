@@ -249,14 +249,12 @@
         <service android:name="com.google.android.gms.analytics.CampaignTrackingService" />
 
         <!-- [START] SYNC_ADAPTER -->
-
         <activity android:name=".sync.view.SignInResolutionActivity" />
         <activity android:name=".sync.view.FolderPickerActivity" />
 
         <service
             android:name=".sync.service.SyncService"
-            android:exported="true"
-            android:process=":sync">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.content.SyncAdapter" />
             </intent-filter>

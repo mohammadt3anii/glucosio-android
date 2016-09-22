@@ -16,6 +16,7 @@
 
 package org.glucosio.android.sync.view;
 
+import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentSender;
@@ -25,6 +26,7 @@ import android.util.Log;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.firebase.crash.FirebaseCrash;
 
 import org.glucosio.android.sync.SyncHelper;
 
@@ -43,6 +45,8 @@ public class SignInResolutionActivity extends AppCompatActivity {
     private ConnectionResult mConnectionResult;
     private String mFileTitle;
     private String mLocalFilePath;
+
+    private Dialog mErrorDialog; // Prevent leaks
 
     public static Intent newStartIntent(Context context, ConnectionResult result, String fileTitle,
                                         String localFilePath) {
@@ -67,10 +71,13 @@ public class SignInResolutionActivity extends AppCompatActivity {
     }
 
     private void showResolutionDialog(ConnectionResult result) {
-        GoogleApiAvailability.getInstance().getErrorDialog(this, result.getErrorCode(), 0).show();
+        mErrorDialog = GoogleApiAvailability.getInstance().getErrorDialog(this, result.getErrorCode(), 1);
         try {
             result.startResolutionForResult(this, RC_RESOLUTION);
         } catch (IntentSender.SendIntentException e) {
+            mErrorDialog.show();
+            FirebaseCrash.log("Drive connection failed");
+            FirebaseCrash.report(e);
             Log.e(TAG, "Exception while starting resolution activity " + e);
         }
     }
@@ -83,8 +90,13 @@ public class SignInResolutionActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == RC_RESOLUTION && resultCode == RESULT_OK) {
             Log.d(TAG, "Resolution OK");
-            SyncHelper.initializeSync(getApplicationContext(), mFileTitle, mLocalFilePath);
+            SyncHelper.initializeSync(this, mFileTitle, mLocalFilePath);
         }
+
+        if(mErrorDialog.isShowing()) {
+            mErrorDialog.dismiss();
+        }
+
         finish();
     }
 

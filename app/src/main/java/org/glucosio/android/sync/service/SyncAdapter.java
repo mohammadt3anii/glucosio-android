@@ -85,17 +85,20 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GoogleAp
     }
 
     @Override
-    public void onPerformSync(Account account, Bundle bundle, String s, ContentProviderClient contentProviderClient, SyncResult syncResult) {
-        Log.d(TAG, "on perform sync");
-        if (mGoogleApiClient == null || !mGoogleApiClient.isConnected()) {
-            initGoogleApiClient(getContext(), account.name);
-            mGoogleApiClient.connect();
-        }
+    public void onPerformSync(Account account, Bundle bundle, String s,
+                              ContentProviderClient contentProviderClient, SyncResult syncResult) {
 
+        Log.d(TAG, "on perform sync");
         mFolderId = bundle.getString(SyncHelper.SYNC_DRIVE_FOLDER_ID, "");
         mFileTitle = bundle.getString(SyncHelper.SYNC_FILE_TITLE, "");
         mLocalFilePath = bundle.getString(SyncHelper.SYNC_LOCAL_FILE_PATH, "");
+
+        if (mGoogleApiClient == null) {
+            initGoogleApiClient(getContext(), account.name);
+        }
+
         if (!mGoogleApiClient.isConnected()) {
+            mGoogleApiClient.connect();
             return;
         }
         sync();
@@ -105,32 +108,6 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GoogleAp
     public void onConnected(@Nullable Bundle bundle) {
         Log.d(TAG, "onConnected()");
         sync();
-    }
-
-    @Override
-    public void onConnectionSuspended(int i) {
-        Log.d(TAG, "onConnectionSuspended() " + i);
-    }
-
-    @Override
-    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
-        Log.d(TAG, "GoogleApiClient connection failed: " + connectionResult.toString());
-        if (connectionResult.hasResolution()) {
-            getContext().startActivity(SignInResolutionActivity.newStartIntent(getContext(), connectionResult,
-                    mFileTitle, mLocalFilePath));
-        } else {
-            Log.e(TAG, "onConnectionFailed() no resolution");
-        }
-    }
-
-    private void initGoogleApiClient(Context context, String accountName) {
-        mGoogleApiClient = new GoogleApiClient.Builder(context)
-                .addApi(Drive.API)
-                .addScope(Drive.SCOPE_FILE)
-//                .setAccountName(accountName) needs permission from debug app
-                .addConnectionCallbacks(this)
-                .addOnConnectionFailedListener(this)
-                .build();
     }
 
     /**
@@ -149,15 +126,44 @@ public class SyncAdapter extends AbstractThreadedSyncAdapter implements GoogleAp
         Log.e(TAG, "onPerformSync(): uploadingToFolder");
     }
 
+
+    @Override
+    public void onConnectionSuspended(int i) {
+        Log.d(TAG, "onConnectionSuspended() " + i);
+    }
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+        Log.d(TAG, "GoogleApiClient connection failed: " + connectionResult.toString());
+        if (connectionResult.hasResolution()) {
+            getContext().startActivity(SignInResolutionActivity.newStartIntent(getContext(), connectionResult,
+                    mFileTitle, mLocalFilePath));
+        } else {
+            Log.e(TAG, "onConnectionFailed() no resolution " + connectionResult);
+        }
+    }
+
+    private void initGoogleApiClient(Context context, String accountName) {
+        mGoogleApiClient = new GoogleApiClient.Builder(context)
+                .addApi(Drive.API)
+                .addScope(Drive.SCOPE_FILE)
+               // .setAccountName(accountName) // needs permission from debug app
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .build();
+    }
+
     private void startPickerActivity() {
         IntentSender folderPickerIntent = Drive.DriveApi
                 .newOpenFileActivityBuilder()
                 .setMimeType(new String[]{DriveFolder.MIME_TYPE})
                 .build(mGoogleApiClient);
-
         getContext().startActivity(FolderPickerActivity.newStartIntent(getContext(), folderPickerIntent));
     }
 
+    /**
+     * If bundle passed null/empty values try to get from sp
+     */
     private void validateAgainstSharedPreferences() {
         SharedPreferences sharedPreferences =
                 getContext().getSharedPreferences(SyncHelper.SYNC_SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
