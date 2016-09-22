@@ -20,6 +20,7 @@
 
 package org.glucosio.android.activity;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
@@ -27,9 +28,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
+import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
@@ -64,6 +71,8 @@ import org.glucosio.android.R;
 import org.glucosio.android.adapter.BackupAdapter;
 import org.glucosio.android.backup.Backup;
 import org.glucosio.android.object.GlucosioBackup;
+import org.glucosio.android.sync.SyncHelper;
+import org.glucosio.android.sync.view.FolderPickerActivity;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -79,6 +88,9 @@ import io.realm.Realm;
 import uk.co.chrisjenx.calligraphy.CalligraphyContextWrapper;
 
 public class BackupActivity extends AppCompatActivity {
+    private static final String FILE_NAME = "glucosio.realm";
+    private static final int RC_GET_ACCOUNTS = 9004;
+
     private int REQUEST_CODE_PICKER = 2;
     private int REQUEST_CODE_SELECT = 3;
     private int REQUEST_CODE_PICKER_FOLDER = 4;
@@ -103,17 +115,22 @@ public class BackupActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.backup_drive_activity);
 
+        ActionBar supportActionBar = getSupportActionBar();
+        if (supportActionBar != null) {
+            supportActionBar.setDisplayHomeAsUpEnabled(true);
+            supportActionBar.setTitle(getResources().getString(R.string.title_activity_backup_drive));
+        }
+
+
         GlucosioApplication glucosioApplication = (GlucosioApplication) getApplicationContext();
-        sharedPref = getPreferences(Context.MODE_PRIVATE);
+//        sharedPref = getPreferences(Context.MODE_PRIVATE);
         realm = glucosioApplication.getDBHandler().getRealmInstance();
 
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-        getSupportActionBar().setTitle(getResources().getString(R.string.title_activity_backup_drive));
 
-        backup = glucosioApplication.getBackup();
-        backup.init(this);
-        connectClient();
-        mGoogleApiClient = backup.getClient();
+//        backup = glucosioApplication.getBackup();
+//        backup.init(this);
+//        connectClient();
+//        mGoogleApiClient = backup.getClient();
 
         backupButton = (Button) findViewById(R.id.activity_backup_drive_button_backup);
         manageButton = (TextView) findViewById(R.id.activity_backup_drive_button_manage_drive);
@@ -123,43 +140,55 @@ public class BackupActivity extends AppCompatActivity {
 
         backupListView.setExpanded(true);
 
+        final String folderId = getSharedPreferences(SyncHelper.SYNC_SHARED_PREFERENCES_NAME, MODE_PRIVATE)
+                .getString(SyncHelper.SYNC_DRIVE_FOLDER_ID, "");
         backupButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (checkForGoogleAccountPermission()) {
+                    SyncHelper.initializeSync(BackupActivity.this, FILE_NAME, realm.getPath());
+//                    SyncHelper.syncToDriveFolder(BackupActivity.this, folderId, FILE_NAME,
+//                            realm.getPath());
+                }
                 // Open Folder picker, then upload the file on Drive
-                openFolderPicker(true);
+//                openFolderPicker(true);
             }
         });
+
+        // Show backup folder, if exists
+        if (!TextUtils.isEmpty(folderId)) {
+            setBackupFolderTitle(DriveId.decodeFromString(folderId));
+            manageButton.setVisibility(View.VISIBLE);
+        }
 
         selectFolderButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // Check first if a folder is already selected
-                if (!"".equals(backupFolder)) {
-                    //Start the picker to choose a folder
-                    //False because we don't want to upload the backup on drive then
-                    openFolderPicker(false);
-                }
+                IntentSender filePickerIntent = Drive.DriveApi
+                        .newOpenFileActivityBuilder()
+                        .setMimeType(new String[]{DriveFolder.MIME_TYPE})
+                        .build(mGoogleApiClient);
+
+                startActivity(FolderPickerActivity.newStartIntent(BackupActivity.this, filePickerIntent));
+//                 Check first if a folder is already selected
+//                if (!"".equals(backupFolder)) {
+                //Start the picker to choose a folder
+                //False because we don't want to upload the backup on drive then
+//                    openFolderPicker(false);
+//                }
             }
         });
 
         manageButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                openOnDrive(DriveId.decodeFromString(backupFolder));
+                openOnDrive(DriveId.decodeFromString(folderId));
             }
         });
 
-        // Show backup folder, if exists
-        backupFolder = sharedPref.getString(BACKUP_FOLDER_KEY, "");
-        if (!("").equals(backupFolder)) {
-            setBackupFolderTitle(DriveId.decodeFromString(backupFolder));
-            manageButton.setVisibility(View.VISIBLE);
-        }
-
         // Populate backup list
-        if (!("").equals(backupFolder)) {
-            getBackupsFromDrive(DriveId.decodeFromString(backupFolder).asDriveFolder());
+        if (!TextUtils.isEmpty(folderId)) {
+            getBackupsFromDrive(DriveId.decodeFromString(folderId).asDriveFolder());
         }
     }
 
@@ -179,69 +208,96 @@ public class BackupActivity extends AppCompatActivity {
         );
     }
 
-    private void openFilePicker() {
-        IntentSender intentSender = null;
-        // check if client is connected first
-        if (mGoogleApiClient.isConnected()) {
-            // build an intent that we'll use to start the open file activity
-            intentSender = Drive.DriveApi
-                    .newOpenFileActivityBuilder()
-//                these mimetypes enable these folders/files types to be selected
-                    .setMimeType(new String[]{DriveFolder.MIME_TYPE, "text/plain"})
-                    .build(mGoogleApiClient);
+//    private void openFilePicker() {
+//        IntentSender intentSender = null;
+//        // check if client is connected first
+//        if (mGoogleApiClient.isConnected()) {
+//            // build an intent that we'll use to start the open file activity
+//            intentSender = Drive.DriveApi
+//                    .newOpenFileActivityBuilder()
+////                these mimetypes enable these folders/files types to be selected
+//                    .setMimeType(new String[]{DriveFolder.MIME_TYPE, "text/plain"})
+//                    .build(mGoogleApiClient);
+//        }
+//        try {
+//            if (intentSender != null) {
+//                startIntentSenderForResult(
+//                        intentSender, REQUEST_CODE_SELECT, null, 0, 0, 0);
+//            }
+//        } catch (IntentSender.SendIntentException e) {
+//            Log.e(TAG, "Unable to send intent", e);
+//            showErrorDialog();
+//        }
+//    }
+//
+//    private void openFolderPicker(boolean uploadToDrive) {
+//        if (uploadToDrive) {
+//            // First we check if a backup folder is set
+//            if ("".equals(backupFolder)) {
+//                try {
+//                    if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
+//                        if (intentPicker == null)
+//                            intentPicker = buildIntent();
+//                        //Start the picker to choose a folder
+//                        startIntentSenderForResult(
+//                                intentPicker, REQUEST_CODE_PICKER, null, 0, 0, 0);
+//                    }
+//                } catch (IntentSender.SendIntentException e) {
+//                    Log.e(TAG, "Unable to send intent", e);
+//                    showErrorDialog();
+//                }
+//            } else {
+//                uploadToDrive(DriveId.decodeFromString(backupFolder));
+//            }
+//        } else {
+//            try {
+//                intentPicker = null;
+//                if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
+//                    if (intentPicker == null)
+//                        intentPicker = buildIntent();
+//                    //Start the picker to choose a folder
+//                    startIntentSenderForResult(
+//                            intentPicker, REQUEST_CODE_PICKER_FOLDER, null, 0, 0, 0);
+//                }
+//            } catch (IntentSender.SendIntentException e) {
+//                Log.e(TAG, "Unable to send intent", e);
+//                showErrorDialog();
+//            }
+//        }
+//    }
+
+//    private IntentSender buildIntent() {
+//        return Drive.DriveApi
+//                .newOpenFileActivityBuilder()
+//                .setMimeType(new String[]{DriveFolder.MIME_TYPE})
+//                .build(mGoogleApiClient);
+//    }
+
+    private boolean checkForGoogleAccountPermission() {
+        if (ContextCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.GET_ACCOUNTS)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.GET_ACCOUNTS}, RC_GET_ACCOUNTS);
+            return false;
         }
-        try {
-            if (intentSender != null) {
-                startIntentSenderForResult(
-                        intentSender, REQUEST_CODE_SELECT, null, 0, 0, 0);
-            }
-        } catch (IntentSender.SendIntentException e) {
-            Log.e(TAG, "Unable to send intent", e);
-            showErrorDialog();
-        }
+        return true;
     }
 
-    private void openFolderPicker(boolean uploadToDrive) {
-        if (uploadToDrive) {
-            // First we check if a backup folder is set
-            if ("".equals(backupFolder)) {
-                try {
-                    if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
-                        if (intentPicker == null)
-                            intentPicker = buildIntent();
-                        //Start the picker to choose a folder
-                        startIntentSenderForResult(
-                                intentPicker, REQUEST_CODE_PICKER, null, 0, 0, 0);
-                    }
-                } catch (IntentSender.SendIntentException e) {
-                    Log.e(TAG, "Unable to send intent", e);
-                    showErrorDialog();
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String permissions[], @NonNull int[] grantResults) {
+        switch (requestCode) {
+            case RC_GET_ACCOUNTS:
+                // If request is cancelled, the result arrays are empty.
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    // permission was granted, yay! Do the
+                    SyncHelper.initializeSync(this, FILE_NAME, realm.getPath());
+                } else {
+                    Toast.makeText(getApplicationContext(), "Can't sync without permission",
+                            Toast.LENGTH_LONG).show();
                 }
-            } else {
-                uploadToDrive(DriveId.decodeFromString(backupFolder));
-            }
-        } else {
-            try {
-                intentPicker = null;
-                if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
-                    if (intentPicker == null)
-                        intentPicker = buildIntent();
-                    //Start the picker to choose a folder
-                    startIntentSenderForResult(
-                            intentPicker, REQUEST_CODE_PICKER_FOLDER, null, 0, 0, 0);
-                }
-            } catch (IntentSender.SendIntentException e) {
-                Log.e(TAG, "Unable to send intent", e);
-                showErrorDialog();
-            }
-        }
-    }
+                break;
 
-    private IntentSender buildIntent() {
-        return Drive.DriveApi
-                .newOpenFileActivityBuilder()
-                .setMimeType(new String[]{DriveFolder.MIME_TYPE})
-                .build(mGoogleApiClient);
+            default:
+        }
     }
 
     private void getBackupsFromDrive(DriveFolder folder) {

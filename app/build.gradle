@@ -107,6 +107,7 @@ dependencies {
     compile "com.android.support:percent:${androidSupportVer}"
 
     // Google Play Services
+    compile "com.google.android.gms:play-services-auth:${googlePlayServicesVer}"
     compile "com.google.android.gms:play-services-analytics:${googlePlayServicesVer}"
     compile "com.google.android.gms:play-services-drive:${googlePlayServicesVer}"
     compile "com.google.android.gms:play-services-wearable:${googlePlayServicesVer}"
