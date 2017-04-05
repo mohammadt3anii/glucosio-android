@@ -29,6 +29,14 @@
         android:name="android.hardware.nfc"
         android:required="false" />
 
+    <!-- Required for fetching feed data. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Required get device accounts (SyncAdapter) -->
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
+    <!-- Required to enable our SyncAdapter after it's created. -->
+    <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
+
     <!-- Required to export and save CSV or graph -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -239,6 +247,29 @@
         </receiver>
 
         <service android:name="com.google.android.gms.analytics.CampaignTrackingService" />
+
+        <!-- [START] SYNC_ADAPTER -->
+        <activity android:name=".sync.view.SignInResolutionActivity" />
+        <activity android:name=".sync.view.FolderPickerActivity" />
+
+        <service
+            android:name=".sync.service.SyncService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/syncadapter" />
+        </service>
+
+        <provider
+            android:name=".sync.service.SyncProvider"
+            android:authorities="@string/sync_authority"
+            android:exported="false"
+            android:label="@string/sync_authenticator_label"
+            android:syncable="true" />
+        <!-- [END] SYNC_ADAPTER -->
 
         <meta-data
             android:name="com.google.android.gms.version"
